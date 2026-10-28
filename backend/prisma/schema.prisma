@@ -1,0 +1,355 @@
+// SkillBridge schema
+// Everything meets at Skill: courses teach skills, certificates and projects prove
+// skills, job postings ask for skills, learning resources build skills.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  SCHOOL_ADMIN // career / guidance office or program head: sees their school's analytics
+  ADMIN        // platform admin: taxonomy, job ingestion
+}
+
+enum SkillSource {
+  COURSE      // from a course in the student's curriculum
+  CERTIFICATE // from a certification such as a TESDA National Certificate
+  PROJECT     // extracted from a project the student described, then confirmed
+  SELF        // self-declared
+}
+
+enum Importance {
+  REQUIRED
+  PREFERRED
+}
+
+// ---------- taxonomy ----------
+
+model Skill {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  category  String
+  aliases   String[] // other ways postings write it: "MS Excel", "spreadsheets"...
+  // Broader skill this one counts towards: MySQL -> SQL, React -> JavaScript
+  parentId  String?  @map("parent_id")
+  createdAt DateTime @default(now())
+
+  parent    Skill?  @relation("SkillTree", fields: [parentId], references: [id])
+  children  Skill[] @relation("SkillTree")
+
+  courseSkills        CourseSkill[]
+  certificationSkills CertificationSkill[]
+  studentSkills       StudentSkill[]
+  jobSkills           JobSkill[]
+  resourceSkills      ResourceSkill[]
+}
+
+model Occupation {
+  id            String   @id @default(uuid())
+  title         String   @unique
+  // A posting whose title contains one of these is classified here
+  titleKeywords String[] @map("title_keywords")
+
+  jobs     JobPosting[]
+  programs ProgramOccupation[]
+}
+
+// ---------- schools ----------
+
+model School {
+  id       String    @id @default(uuid())
+  code     String    @unique
+  name     String
+  programs Program[]
+  users    User[]
+}
+
+model Program {
+  id       String @id @default(uuid())
+  schoolId String @map("school_id")
+  code     String // BSIT, BSBA-MM...
+  name     String
+
+  school      School              @relation(fields: [schoolId], references: [id])
+  courses     Course[]
+  occupations ProgramOccupation[]
+  students    User[]
+
+  @@unique([schoolId, code])
+}
+
+// The jobs a program prepares students for
+model ProgramOccupation {
+  programId    String @map("program_id")
+  occupationId String @map("occupation_id")
+
+  program    Program    @relation(fields: [programId], references: [id], onDelete: Cascade)
+  occupation Occupation @relation(fields: [occupationId], references: [id], onDelete: Cascade)
+
+  @@id([programId, occupationId])
+}
+
+model Course {
+  id          String  @id @default(uuid())
+  programId   String  @map("program_id")
+  code        String
+  title       String
+  description String?
+
+  program Program       @relation(fields: [programId], references: [id], onDelete: Cascade)
+  skills  CourseSkill[]
+
+  @@unique([programId, code])
+}
+
+model CourseSkill {
+  courseId String @map("course_id")
+  skillId  String @map("skill_id")
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  skill  Skill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([courseId, skillId])
+}
+
+model Certification {
+  id     String @id @default(uuid())
+  name   String @unique
+  issuer String
+
+  skills CertificationSkill[]
+}
+
+model CertificationSkill {
+  certificationId String @map("certification_id")
+  skillId         String @map("skill_id")
+
+  certification Certification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  skill         Skill         @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([certificationId, skillId])
+}
+
+// ---------- people ----------
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(STUDENT)
+  schoolId  String?  @map("school_id")
+  programId String?  @map("program_id")
+  // Typed by a student whose school is not on SkillBridge yet. Kept as plain text
+  // (not new School rows) so typos never reach career-office analytics.
+  schoolName  String? @map("school_name")
+  programName String? @map("program_name")
+  createdAt DateTime @default(now())
+
+  school   School?        @relation(fields: [schoolId], references: [id])
+  program  Program?       @relation(fields: [programId], references: [id])
+  resume   Resume?
+  skills        StudentSkill[]
+  projects      Project[]
+  notifications Notification[]
+}
+
+model StudentSkill {
+  id        String      @id @default(uuid())
+  userId    String      @map("user_id")
+  skillId   String      @map("skill_id")
+  source    SkillSource
+  // What backs it up: course code, certificate name, project title ("" for SELF).
+  // Not nullable on purpose: NULLs are never equal in a unique index.
+  evidence  String      @default("")
+  createdAt DateTime    @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  // The same skill can be backed by several sources, but each piece of evidence once
+  @@unique([userId, skillId, source, evidence])
+  @@index([userId])
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  title       String
+  description String
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------- jobs ----------
+
+model JobPosting {
+  id           String    @id @default(uuid())
+  source       String    // "peso-jobfair-2026", "partner-feed:acme"...
+  externalId   String?   @map("external_id")
+  title        String
+  company      String
+  location     String?
+  description  String
+  url          String?
+  postedAt     DateTime  @map("posted_at")
+  // Same posting re-imported from another source is detected by this
+  contentHash  String    @unique @map("content_hash")
+  occupationId String?   @map("occupation_id")
+  extractedAt  DateTime? @map("extracted_at")
+  // Students only see a posting from this moment (Remotive requires a 24 h delay)
+  visibleAt    DateTime  @default(now()) @map("visible_at")
+  // Set once matching students were notified, so each posting alerts only once
+  notifiedAt   DateTime? @map("notified_at")
+  createdAt    DateTime  @default(now())
+
+  occupation    Occupation?    @relation(fields: [occupationId], references: [id])
+  skills        JobSkill[]
+  notifications Notification[]
+
+  @@unique([source, externalId])
+  @@index([occupationId])
+  @@index([postedAt])
+  @@index([notifiedAt, visibleAt])
+}
+
+// "A new posting matches you" alerts for students
+model Notification {
+  id        String     @id @default(uuid())
+  userId    String     @map("user_id")
+  jobId     String     @map("job_id")
+  status    String     // READY | CLOSE
+  score     Int
+  readAt    DateTime?  @map("read_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job  JobPosting @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId, readAt])
+}
+
+model JobSkill {
+  jobId      String     @map("job_id")
+  skillId    String     @map("skill_id")
+  importance Importance
+
+  job   JobPosting @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill Skill      @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([jobId, skillId])
+  @@index([skillId])
+}
+
+enum SourceType {
+  JSON_FEED // any partner feed, read with fieldMap
+  REMOTIVE  // remotive.com public API (remote jobs; attribution + 24 h delay required)
+  JOOBLE    // jooble.org API (needs JOOBLE_API_KEY)
+}
+
+// Sources the scheduler pulls automatically (only ones whose owner allows it)
+model JobSource {
+  id              String     @id @default(uuid())
+  name            String     @unique
+  type            SourceType @default(JSON_FEED)
+  url             String?    // JSON_FEED only; the API sources have fixed endpoints
+  // Where each field lives in the feed's items, e.g. { "title": "job_title", "description": "details.body" }
+  fieldMap        Json       @default("{}") @map("field_map")
+  itemsPath       String?    @map("items_path") // e.g. "data.jobs"; empty = the response is the array
+  // Source-specific options, e.g. Jooble { "keywords": ["web developer"], "location": "Philippines" }
+  params          Json       @default("{}")
+  enabled         Boolean    @default(true)
+  intervalMinutes Int        @default(360) @map("interval_minutes")
+  nextRunAt       DateTime?  @map("next_run_at")
+  lastRunAt       DateTime?  @map("last_run_at")
+  lastStatus      String?    @map("last_status") // OK | FAILED
+  lastError       String?    @map("last_error")
+  createdAt       DateTime   @default(now())
+}
+
+// Audit log of every ingestion
+model ImportRun {
+  id         String   @id @default(uuid())
+  source     String
+  received   Int
+  created    Int
+  updated    Int      @default(0) // same source + externalId, but the content changed
+  duplicates Int
+  failed     Int
+  errors     Json     @default("[]")
+  startedAt  DateTime @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+}
+
+// Hiring posts the AI read from pasted text but did not publish on its own:
+// a red flag was found, or a required field (company...) was missing
+enum PostingRisk {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ReviewStatus {
+  PENDING
+  PUBLISHED
+  REJECTED
+}
+
+model PostingReview {
+  id         String       @id @default(uuid())
+  source     String
+  // The posting as the AI read it: { title, company, location, description, url }
+  data       Json
+  risk       PostingRisk
+  reasons    String[]
+  status     ReviewStatus @default(PENDING)
+  jobId      String?      @map("job_id") // set once published
+  reviewedBy String?      @map("reviewed_by")
+  reviewedAt DateTime?    @map("reviewed_at")
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  @@index([status, createdAt])
+}
+
+// The student's latest resume: what they entered, and the written version
+model Resume {
+  id          String   @id @default(uuid())
+  userId      String   @unique @map("user_id")
+  input       Json     // contact, about, education, experience as the student typed them
+  content     Json     // summary, sections and bullets as shown and printed
+  generatedBy String   @map("generated_by") // AI | TEMPLATE
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ---------- learning ----------
+
+model LearningResource {
+  id       String  @id @default(uuid())
+  title    String
+  provider String
+  url      String
+  hours    Int?
+  free     Boolean @default(true)
+
+  skills ResourceSkill[]
+}
+
+model ResourceSkill {
+  resourceId String @map("resource_id")
+  skillId    String @map("skill_id")
+
+  resource LearningResource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  skill    Skill            @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@id([resourceId, skillId])
+}
