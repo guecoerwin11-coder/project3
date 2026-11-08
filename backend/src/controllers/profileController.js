@@ -6,6 +6,9 @@ import { studentMatches, studentGapReport } from '../services/insightService.js'
 
 const SOURCES = ['COURSE', 'CERTIFICATE', 'PROJECT', 'SELF']
 
+// "  Adobe   Premiere " -> "adobe premiere": how custom skills are compared and counted
+const skillKey = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase()
+
 const addSkills = (userId, skillIds, source, evidence) => prisma.studentSkill.createMany({
     data: skillIds.map(skillId => ({ userId, skillId, source, evidence })),
     skipDuplicates: true
@@ -27,7 +30,10 @@ const getMySkills = async (req, res, next) => {
             groups.get(k).skills.push({ rowId: r.id, ...r.skill })
         }
         const unique = new Map(rows.map(r => [r.skill.id, r.skill]))
-        res.status(200).json({ totalSkills: unique.size, groups: [...groups.values()] })
+        const custom = await prisma.customSkill.findMany({
+            where: { userId: req.user.id }, orderBy: { createdAt: 'asc' }, select: { id: true, name: true }
+        })
+        res.status(200).json({ totalSkills: unique.size + custom.length, groups: [...groups.values()], customSkills: custom })
     }catch(err){
         next(err)
     }
@@ -39,6 +45,43 @@ const addSelfSkill = async (req, res, next) => {
         if(!skillId || !(await prisma.skill.findUnique({ where: { id: skillId } }))) throw new NotFound('Skill not found')
         await addSkills(req.user.id, [skillId], 'SELF', '')
         res.status(201).json({ message: 'skill added' })
+    }catch(err){
+        next(err)
+    }
+}
+
+// A skill that is not in the search results: "Canva", "CapCut"...
+// If it IS known under that name or an alias ("ms excel"), the real skill is added
+// instead, because only real skills count in job matching.
+const addCustomSkill = async (req, res, next) => {
+    try{
+        const name = typeof req.body?.name === 'string' ? req.body.name.trim().replace(/\s+/g, ' ') : ''
+        if(name.length < 2 || name.length > 60) throw new BadRequest('skill name must be 2 to 60 characters')
+        const nameKey = skillKey(name)
+
+        const taxonomy = await getTaxonomy()
+        const known = taxonomy.skills.find(s => [s.name, ...(s.aliases ?? [])].some(t => skillKey(t) === nameKey))
+        if(known){
+            await addSkills(req.user.id, [known.id], 'SELF', '')
+            return res.status(201).json({ added: 'known', skill: { id: known.id, name: known.name } })
+        }
+
+        const custom = await prisma.customSkill.upsert({
+            where: { userId_nameKey: { userId: req.user.id, nameKey } },
+            create: { userId: req.user.id, name, nameKey },
+            update: {}
+        })
+        res.status(201).json({ added: 'custom', skill: { id: custom.id, name: custom.name } })
+    }catch(err){
+        next(err)
+    }
+}
+
+const deleteCustomSkill = async (req, res, next) => {
+    try{
+        const { count } = await prisma.customSkill.deleteMany({ where: { id: req.params.id, userId: req.user.id } })
+        if(!count) throw new NotFound('Skill not found on your profile')
+        res.status(200).json({ message: 'skill removed' })
     }catch(err){
         next(err)
     }
@@ -176,6 +219,6 @@ const getGapReport = async (req, res, next) => {
 }
 
 export {
-    getMySkills, addSelfSkill, deleteSkill, deleteEvidence, addCourses, addCertification,
+    getMySkills, addSelfSkill, addCustomSkill, deleteCustomSkill, skillKey, deleteSkill, deleteEvidence, addCourses, addCertification,
     extractProjectSkills, saveProject, getMatches, getGapReport
 }

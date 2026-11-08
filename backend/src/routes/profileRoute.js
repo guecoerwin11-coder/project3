@@ -1,6 +1,6 @@
 import express from 'express'
 import {
-    getMySkills, addSelfSkill, deleteSkill, deleteEvidence, addCourses, addCertification,
+    getMySkills, addSelfSkill, addCustomSkill, deleteCustomSkill, deleteSkill, deleteEvidence, addCourses, addCertification,
     extractProjectSkills, saveProject, getMatches, getGapReport
 } from '../controllers/profileController.js'
 import validation from '../middleware/validation.js'
@@ -39,6 +39,39 @@ const student = [validation, isAuthorize('STUDENT')]
  */
 profileRouter.get('/me/skills', ...student, getMySkills)
 profileRouter.post('/me/skills', ...student, addSelfSkill)
+
+/**
+ * @openapi
+ * /me/custom-skills:
+ *   post:
+ *     summary: Add a skill that is not in the SkillBridge list (e.g. Canva)
+ *     description: |
+ *       If the name matches a known skill or alias ("ms excel"), that real skill is added instead
+ *       (added = "known"), because only real skills count in job matching. Otherwise it is kept as
+ *       the student's own skill (added = "custom"); admins see these and can add them to the list.
+ *     tags: [Student]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { type: object, required: [name], properties: { name: { type: string, example: Canva } } }
+ *     responses:
+ *       201: { description: "{ added: known | custom, skill }" }
+ *       400: { $ref: '#/components/responses/BadRequest' }
+ * /me/custom-skills/{id}:
+ *   delete:
+ *     summary: Remove one of my own skills
+ *     tags: [Student]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: path, name: id, required: true, schema: { type: string } }
+ *     responses:
+ *       200: { description: Removed }
+ *       404: { $ref: '#/components/responses/NotFound' }
+ */
+profileRouter.post('/me/custom-skills', ...student, addCustomSkill)
+profileRouter.delete('/me/custom-skills/:id', ...student, deleteCustomSkill)
 
 /**
  * @openapi

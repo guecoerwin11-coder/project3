@@ -1,6 +1,6 @@
 import express from 'express'
 import {
-    listSchools, listUnlistedSchools, listCourses, listSkills, createSkill, updateSkill, listOccupations, listCertifications
+    listSchools, listUnlistedSchools, listRequestedSkills, listCourses, listSkills, createSkill, updateSkill, listOccupations, listCertifications
 } from '../controllers/catalogController.js'
 import validation from '../middleware/validation.js'
 import isAuthorize from '../middleware/isAuthorize.js'
@@ -84,6 +84,19 @@ catalogRouter.get('/programs/:id/courses', validation, listCourses)
  */
 catalogRouter.get('/skills', validation, listSkills)
 catalogRouter.post('/skills', validation, isAuthorize('ADMIN'), createSkill)
+
+/**
+ * @openapi
+ * /skills/requested:
+ *   get:
+ *     summary: Skills students added that are not in the taxonomy, most students first (ADMIN)
+ *     description: Adding one with POST /skills (name or alias) gives those students the real skill.
+ *     tags: [Catalog]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: "[{ name, students }]" }
+ */
+catalogRouter.get('/skills/requested', validation, isAuthorize('ADMIN'), listRequestedSkills)
 
 /**
  * @openapi

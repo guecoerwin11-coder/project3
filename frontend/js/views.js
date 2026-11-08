@@ -9,7 +9,7 @@ const ROLE_LABEL = { STUDENT: 'Student', SCHOOL_ADMIN: 'Career office', ADMIN: '
 
 export const NAV = {
     STUDENT: [['profile', 'My skills'], ['matches', 'Job matches'], ['alerts', 'Job alerts'], ['jobcheck', 'Check a job link'],
-        ['resume', 'Resume maker'], ['gap', 'Gap report'], ['assistant', 'AI assistant'], ['market', 'Job market']],
+        ['resume', 'Resume maker'], ['interview', 'Mock interview'], ['gap', 'Gap report'], ['assistant', 'AI assistant'], ['market', 'Job market']],
     SCHOOL_ADMIN: [['programs', 'Program insights'], ['market', 'Job market']],
     ADMIN: [['ingest', 'Ingestion'], ['jobs', 'Postings'], ['taxonomy', 'Skills taxonomy'], ['programs', 'Program insights'], ['market', 'Job market']]
 }
@@ -129,7 +129,14 @@ export const profile = (state) => {
             </div>
             <div class="chips">${g.skills.map(s => `
                 <span class="chip">${esc(s.name)}<button aria-label="Remove ${esc(s.name)}" data-action="remove-skill" data-id="${esc(s.rowId)}">×</button></span>`).join('')}
-            </div>`).join('') : '<div class="empty">No skills yet. Start with the courses you have taken below.</div>'}
+            </div>`).join('') : ''}
+        ${skills.customSkills?.length ? `
+            <div class="chip-label">Your own skills</div>
+            <div class="chips">${skills.customSkills.map(s => `
+                <span class="chip custom">${esc(s.name)}<button aria-label="Remove ${esc(s.name)}" data-action="remove-custom-skill" data-id="${esc(s.id)}">×</button></span>`).join('')}
+            </div>
+            <p class="hint">These show on your profile and resume. Job matching can count them once SkillBridge adds them to its skill list.</p>` : ''}
+        ${!skills.groups.length && !skills.customSkills?.length ? '<div class="empty">No skills yet. Start with the courses you have taken, your certificates or a project below.</div>' : ''}
     </div>
 
     <div class="grid two section">
@@ -171,7 +178,11 @@ export const profile = (state) => {
             </form>
             ${state.skillResults ? `<div class="chips" style="margin-top:10px">${state.skillResults.length
                 ? state.skillResults.slice(0, 20).map(s => `<button class="chip plain" data-action="add-skill" data-id="${esc(s.id)}">+ ${esc(s.name)}</button>`).join('')
-                : '<span class="hint">No skill matches that. An admin can add it to the taxonomy.</span>'}</div>` : ''}
+                : '<span class="hint">SkillBridge doesn\'t have that skill in its list yet.</span>'}</div>
+            ${state.skillQuery && !state.skillResults.some(s => s.name.toLowerCase() === state.skillQuery.toLowerCase()) ? `
+            <div style="margin-top:10px">
+                <button type="button" class="small" data-action="add-custom-skill">+ Add "${esc(state.skillQuery)}" as my own skill</button>
+            </div>` : ''}` : ''}
         </div>
     </div>
 
@@ -216,8 +227,17 @@ const jobCard = (m) => `
         ${m.missingRequired.length ? `<div><div class="chip-label">Missing (required)</div>${chips(m.missingRequired, 'miss')}</div>` : ''}
         ${m.matchedRequired.length ? `<div><div class="chip-label">You have</div>${chips([...m.matchedRequired, ...m.matchedPreferred])}</div>` : ''}
         ${m.missingPreferred.length ? `<div><div class="chip-label">Nice to have</div>${chips(m.missingPreferred, 'plain')}</div>` : ''}
-        ${m.job.url ? `<div><a href="${esc(m.job.url)}" target="_blank" rel="noopener noreferrer">View posting</a>${attribution(m.job.attribution)}</div>` : ''}
+        <div class="job-actions">
+            ${m.job.url ? `<span><a href="${esc(m.job.url)}" target="_blank" rel="noopener noreferrer">View posting</a>${attribution(m.job.attribution)}</span>` : ''}
+            ${practiceButton(m.score, `data-job-id="${esc(m.job.id)}"`)}
+        </div>
     </div>`
+
+// Mock interviews open at a 30% match (below that, learning comes first)
+export const INTERVIEW_MIN_SCORE = 30
+const practiceButton = (score, target) => score >= INTERVIEW_MIN_SCORE
+    ? `<button type="button" class="small" data-action="start-interview" ${target}>Practice interview</button>`
+    : `<span class="hint" data-tip="Mock interviews open at a ${INTERVIEW_MIN_SCORE}% match">Interview practice at ${INTERVIEW_MIN_SCORE}%+</span>`
 
 // Required by some sources' terms (Remotive): credit and link back on every job
 const attribution = (a) => a
@@ -246,6 +266,7 @@ export const alerts = (state) => {
                 ${n.job.url ? `<a href="${esc(n.job.url)}" target="_blank" rel="noopener noreferrer">View posting</a>${attribution(n.job.source === 'remotive' ? { name: 'Remotive', url: 'https://remotive.com' } : null)} · ` : ''}
                 <a href="#/matches">See what you're missing</a>
             </div>
+            <div class="job-actions">${practiceButton(n.score, `data-job-id="${esc(n.job.id)}"`)}</div>
         </div>`).join('')}</div>`
     : '<div class="empty">No alerts yet. When a new posting fits your skills, it shows up here.</div>'}`
 }
@@ -716,6 +737,15 @@ export const taxonomy = (state) => {
     return `
     <h1>Skills taxonomy</h1>
     <p class="sub">${plural(skills.length, 'skill')}. Aliases are the ways postings write a skill. A parent means "counts towards": knowing MySQL satisfies a posting asking for SQL.</p>
+    ${state.data.requestedSkills?.length ? `
+    <div class="card" style="margin-bottom:18px">
+        <h2>Skills students added themselves</h2>
+        <p class="hint">Not in the list yet, so job matching cannot use them. Pick one to add it below
+            (or add its spelling as an alias of an existing skill): every student who typed it gets the real skill.</p>
+        <div class="chips">${state.data.requestedSkills.map(r => `
+            <button type="button" class="chip plain" data-action="prefill-skill" data-name="${esc(r.name)}">+ ${esc(r.name)} <span class="hint">· ${plural(r.students, 'student')}</span></button>`).join('')}
+        </div>
+    </div>` : ''}
     <div class="card">
         <h2>Add a skill</h2>
         <form class="stack" data-form="new-skill" style="margin-top:10px">
@@ -880,7 +910,13 @@ const jobCheckResult = (state, r) => {
                 </div>` : `
                 <button class="primary" data-action="cover-letter" ${state.coverLetterBusy ? 'disabled' : ''}>${state.coverLetterBusy ? 'Writing…' : 'Write a cover letter for this job'}</button>`}`
         : '<p class="hint">The AI writer is not set up on this server.</p>'}
-    </div>`
+    </div>
+    ${m ? `
+    <div class="card section">
+        <h2>Practice the interview</h2>
+        <p class="hint">An AI interviewer asks questions written from this job's description, then gives you feedback.</p>
+        ${practiceButton(m.score, 'data-from="jobcheck"')}
+    </div>` : ''}`
 }
 
 // ---------------------------------------------------------------- student: resume maker
@@ -892,33 +928,55 @@ export const resume = (state) => {
     const c = input.contact ?? {}
     const busy = state.resumeBusy
 
-    const eduRow = (e, i) => `
-        <div class="entry">
-            <div class="row">
-                <label>School <input name="edu.${i}.school" maxlength="150" value="${esc(e.school)}"></label>
-                <label>Degree / program <input name="edu.${i}.degree" maxlength="150" value="${esc(e.degree)}"></label>
-            </div>
-            <div class="row">
-                <label>Years <input name="edu.${i}.years" maxlength="40" placeholder="2022 – 2026" value="${esc(e.years)}"></label>
-                <label>Honors / details <input name="edu.${i}.details" maxlength="400" placeholder="Dean's Lister, thesis…" value="${esc(e.details)}"></label>
-            </div>
-            <button type="button" class="link small" data-action="resume-remove" data-list="education" data-index="${i}">Remove</button>
-        </div>`
     const expRow = (e, i) => `
         <div class="entry">
             <div class="row">
                 <label>Role <input name="exp.${i}.role" maxlength="120" placeholder="OJT IT Intern" value="${esc(e.role)}"></label>
                 <label>Organization <input name="exp.${i}.organization" maxlength="150" placeholder="City Hall MIS Office" value="${esc(e.organization)}"></label>
             </div>
-            <label>Dates <input name="exp.${i}.dates" maxlength="60" placeholder="Jun – Aug 2026" value="${esc(e.dates)}"></label>
+            <div class="row">
+                <label>Dates <input name="exp.${i}.dates" maxlength="60" placeholder="Jun – Aug 2026" value="${esc(e.dates)}"></label>
+                <label>Location <input name="exp.${i}.location" maxlength="100" placeholder="Capas, Tarlac" value="${esc(e.location ?? '')}"></label>
+            </div>
             <label>What you did <span class="hint">Plain sentences are fine${d.aiAvailable ? '; the AI polishes the wording but never adds facts' : ''}</span>
                 <textarea name="exp.${i}.description" maxlength="1500" placeholder="Fixed computers and printers. Helped staff with Excel reports…">${esc(e.description)}</textarea></label>
             <button type="button" class="link small" data-action="resume-remove" data-list="experience" data-index="${i}">Remove</button>
         </div>`
+    const eduRow = (e, i) => `
+        <div class="entry">
+            <div class="row">
+                <label>School <input name="edu.${i}.school" maxlength="150" placeholder="Dominican College of Tarlac" value="${esc(e.school)}"></label>
+                <label>Years <input name="edu.${i}.years" maxlength="40" placeholder="2022 – Present" value="${esc(e.years)}"></label>
+            </div>
+            <div class="row">
+                <label>Degree <input name="edu.${i}.degree" maxlength="150" placeholder="Bachelor of Science in Information Technology" value="${esc(e.degree)}"></label>
+                <label>Location <input name="edu.${i}.location" maxlength="100" placeholder="Capas, Tarlac" value="${esc(e.location ?? '')}"></label>
+            </div>
+            <button type="button" class="link small" data-action="resume-remove" data-list="education" data-index="${i}">Remove</button>
+        </div>`
+    const projRow = (e, i) => `
+        <div class="entry">
+            <div class="row">
+                <label>Project title <input name="proj.${i}.title" maxlength="150" placeholder="Clinic booking system" value="${esc(e.title)}"></label>
+                <label>Tools used <input name="proj.${i}.tools" maxlength="200" placeholder="React, Firebase" value="${esc(e.tools ?? '')}"></label>
+            </div>
+            <label>What it does / what you did <span class="hint">Plain sentences are fine${d.aiAvailable ? '; the AI polishes the wording but never adds facts' : ''}</span>
+                <textarea name="proj.${i}.description" maxlength="1500" placeholder="Built a booking page for patients. Made the admin dashboard…">${esc(e.description ?? '')}</textarea></label>
+            <button type="button" class="link small" data-action="resume-remove" data-list="projects" data-index="${i}">Remove</button>
+        </div>`
+    const certRow = (e, i) => `
+        <div class="entry">
+            <label>Certificate <input name="cert.${i}.name" maxlength="150" placeholder="Computer Systems Servicing NC II" value="${esc(e.name)}"></label>
+            <div class="row">
+                <label>Issued by <input name="cert.${i}.issuer" maxlength="150" placeholder="TESDA" value="${esc(e.issuer ?? '')}"></label>
+                <label>Date <input name="cert.${i}.date" maxlength="40" placeholder="2025" value="${esc(e.date ?? '')}"></label>
+            </div>
+            <button type="button" class="link small" data-action="resume-remove" data-list="certifications" data-index="${i}">Remove</button>
+        </div>`
 
     return `
     <h1>Resume maker</h1>
-    <p class="sub">Your skills, certificates and projects come from your profile. Add the rest, build it, then see the jobs this resume is strongest for.</p>
+    <p class="sub">A skills-first resume: choose the skills to show, add your experience, projects and certificates, and build it. Certificates and projects on your profile are included too. Then see the jobs this resume is strongest for.</p>
     <div class="resume-layout">
         <form class="card stack" data-form="resume">
             <h2>Your details</h2>
@@ -936,16 +994,29 @@ export const resume = (state) => {
             <label>About you <span class="hint">A few honest lines: what you study, what you like doing</span>
                 <textarea name="about" maxlength="1000">${esc(input.about)}</textarea></label>
 
-            <h2 class="section">Education</h2>
-            ${(input.education ?? []).map(eduRow).join('')}
-            <div><button type="button" class="small" data-action="resume-add" data-list="education">+ Add education</button></div>
+            ${resumeSkillsField(input.skills ?? [], d.profileSkills ?? [])}
 
             <h2 class="section">Experience</h2>
             <p class="hint">OJT, part-time jobs, freelance, org officer roles and volunteering all count.</p>
             ${(input.experience ?? []).map(expRow).join('')}
             <div><button type="button" class="small" data-action="resume-add" data-list="experience">+ Add experience</button></div>
 
-            <label class="check"><input type="checkbox" name="includeProjects" ${input.includeProjects !== false ? 'checked' : ''}> Include my projects from my profile</label>
+            <h2 class="section">Education</h2>
+            <p class="hint">Leave it empty and the section is not printed.</p>
+            ${(input.education ?? []).map(eduRow).join('')}
+            <div><button type="button" class="small" data-action="resume-add" data-list="education">+ Add education</button></div>
+
+            <h2 class="section">Projects</h2>
+            <p class="hint">School, capstone or personal projects that are not on your profile yet.</p>
+            <label class="check"><input type="checkbox" name="includeProjects" ${input.includeProjects !== false ? 'checked' : ''}> Also include the projects on my profile</label>
+            ${(input.projects ?? []).map(projRow).join('')}
+            <div><button type="button" class="small" data-action="resume-add" data-list="projects">+ Add project</button></div>
+
+            <h2 class="section">Certifications</h2>
+            <p class="hint">Certificates on your profile are printed automatically. Add any others here (trainings, online courses, seminars).</p>
+            ${(input.certifications ?? []).map(certRow).join('')}
+            <div><button type="button" class="small" data-action="resume-add" data-list="certifications">+ Add certificate</button></div>
+
             <div class="inline">
                 <button class="primary" type="submit" ${busy ? 'disabled' : ''}>${busy ? 'Building…' : d.aiAvailable ? 'Build my resume with AI' : 'Build my resume'}</button>
                 ${d.content ? '<button type="button" data-action="print-resume">Print / save as PDF</button>' : ''}
@@ -958,29 +1029,78 @@ export const resume = (state) => {
     ${d.suggestions ? resumeSuggestions(d.suggestions) : ''}`
 }
 
+// Skills the student puts on the resume themselves. Profile skills are only suggestions.
+const resumeSkillsField = (chosen, profileSkills) => {
+    const picked = new Set(chosen.map(s => s.toLowerCase()))
+    const offer = profileSkills.filter(s => !picked.has(s.name.toLowerCase()))
+    return `
+            <h2 class="section">Skills</h2>
+            <p class="hint">Only the skills you add here appear on your resume. Put the ones you can back up in an interview.</p>
+            <div class="chips skill-picked" aria-label="Skills on your resume">
+                ${chosen.length ? chosen.map((s, i) => `
+                    <span class="chip">${esc(s)}<input type="hidden" name="skill" value="${esc(s)}"><button type="button" aria-label="Remove ${esc(s)}" data-action="resume-skill-remove" data-index="${i}">×</button></span>`).join('')
+                : '<span class="hint">No skills added yet.</span>'}
+            </div>
+            <div class="skill-adder">
+                <label for="resume-skill-input">Type any skill <span class="hint">Not in the suggestions below? Type it here and press Enter.</span></label>
+                <div class="skill-adder-row">
+                    <input id="resume-skill-input" maxlength="60" placeholder="e.g. Canva, CapCut, Bookkeeping" data-enter="resume-skill-add" autocomplete="off">
+                    <button type="button" class="primary" data-action="resume-skill-add">+ Add skill</button>
+                </div>
+            </div>
+            ${offer.length ? `
+            <div>
+                <div class="chip-label">From your profile: tap to add</div>
+                <div class="chips">
+                    ${offer.map(s => `<button type="button" class="chip plain" data-action="resume-skill-suggest" data-name="${esc(s.name)}" data-tip="${esc(s.category)}">+ ${esc(s.name)}</button>`).join('')}
+                    <button type="button" class="link small" data-action="resume-skill-all">Add all ${offer.length}</button>
+                </div>
+            </div>` : ''}`
+}
+
 // The printable document
+// Classic one-column resume (the format recruiters and ATS read best):
+//   NAME
+//   email ◆ phone ◆ location ◆ link
+//   PROFESSIONAL SUMMARY / WORK EXPERIENCE / PROJECTS / EDUCATION / CERTIFICATIONS & SKILLS
+// Each entry: bold name + bold date on the right, italic role + italic location below.
 const resumeDoc = (r) => {
     const contact = [r.contact?.email, r.contact?.phone, r.contact?.location, r.contact?.link].filter(Boolean)
     const section = (title, body) => body ? `<section><h3>${esc(title)}</h3>${body}</section>` : ''
+    const line = (left, right, cls) => left || right
+        ? `<div class="line ${cls}"><span>${left}</span>${right ? `<span>${right}</span>` : ''}</div>` : ''
+    const bullets = (list) => list?.length ? `<ul>${list.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : ''
+    const skills = r.skillList ?? r.skillGroups?.flatMap(g => g.skills) ?? []
+    const certs = r.certifications ?? []
+
     return `
     <article class="resume-doc" id="resume-doc">
         <header>
             <h2>${esc(r.name)}</h2>
-            ${r.headline ? `<div class="headline">${esc(r.headline)}</div>` : ''}
-            ${contact.length ? `<div class="contact">${contact.map(esc).join('  ·  ')}</div>` : ''}
+            ${contact.length ? `<div class="contact">${contact.map(esc).join(' <span class="sep">◆</span> ')}</div>` : ''}
         </header>
-        ${section('Summary', r.summary ? `<p>${esc(r.summary)}</p>` : '')}
-        ${section('Skills', r.skillGroups?.length ? `<dl class="skills">${r.skillGroups.map(g => `<dt>${esc(g.category)}</dt><dd>${g.skills.map(esc).join(', ')}</dd>`).join('')}</dl>` : '')}
-        ${section('Experience', r.experience?.length ? r.experience.map(e => `
-            <div class="item"><div class="item-head"><strong>${esc(e.role)}</strong>${e.organization ? ` · ${esc(e.organization)}` : ''}<span>${esc(e.dates)}</span></div>
-            ${e.bullets.length ? `<ul>${e.bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}</div>`).join('') : '')}
-        ${section('Projects', r.projects?.length ? r.projects.map(p => `
-            <div class="item"><div class="item-head"><strong>${esc(p.title)}</strong>${p.skills?.length ? `<span>${p.skills.map(esc).join(', ')}</span>` : ''}</div>
-            ${p.bullets.length ? `<ul>${p.bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}</div>`).join('') : '')}
-        ${section('Education', r.education?.length ? r.education.map(e => `
-            <div class="item"><div class="item-head"><strong>${esc(e.degree)}</strong>${e.school ? ` · ${esc(e.school)}` : ''}<span>${esc(e.years)}</span></div>
-            ${e.details ? `<p>${esc(e.details)}</p>` : ''}</div>`).join('') : '')}
-        ${section('Certifications', r.certifications?.length ? `<ul>${r.certifications.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '')}
+        ${section('Professional Summary', r.summary ? `<p>${esc(r.summary)}</p>` : '')}
+        ${section('Work Experience', r.experience?.map(e => `
+            <div class="item">
+                ${line(esc(e.organization || e.role), esc(e.dates), 'head')}
+                ${e.organization ? line(esc(e.role), esc(e.location ?? ''), 'role') : line('', esc(e.location ?? ''), 'role')}
+                ${bullets(e.bullets)}
+            </div>`).join(''))}
+        ${section('Projects', r.projects?.map(p => `
+            <div class="item">
+                ${line(esc(p.title), '', 'head')}
+                ${p.skills?.length ? line(esc(p.skills.join(', ')), '', 'role') : ''}
+                ${bullets(p.bullets)}
+            </div>`).join(''))}
+        ${section('Education', r.education?.filter(e => e.school || e.degree).map(e => `
+            <div class="item">
+                ${line(esc(e.school), esc(e.years), 'head')}
+                ${line(esc(e.degree), esc(e.location ?? ''), 'role')}
+            </div>`).join(''))}
+        ${section(certs.length ? 'Certifications & Skills' : 'Skills', skills.length || certs.length ? `<ul>
+            ${skills.length ? `<li><strong>Skills:</strong> ${skills.map(esc).join('; ')}</li>` : ''}
+            ${certs.length ? `<li><strong>Certifications:</strong> ${certs.map(esc).join('; ')}</li>` : ''}
+        </ul>` : '')}
     </article>`
 }
 
@@ -1000,7 +1120,7 @@ const resumeSuggestions = (s) => `
                 ${j.why.length ? `<div><div class="chip-label">You match on</div>${chips(j.why.map(name => ({ name })))}</div>` : ''}
                 ${j.missing.length ? `<div><div class="chip-label">Missing</div>${chips(j.missing.map(name => ({ name })), 'miss')}</div>` : ''}
                 ${j.job.url ? `<div><a href="${esc(j.job.url)}" target="_blank" rel="noopener noreferrer">View and apply</a>${attribution(j.job.attribution)}</div>` : ''}
-            </div>`).join('') : '<div class="card"><p class="hint">No Ready or Close jobs right now. Check the Gap report for what to learn first.</p></div>'}
+            </div>`).join('') : '<div class="card"><p class="hint">No strong matches yet (Ready, or Close with at least a 50% match). The <a href="#/gap">Gap report</a> shows the one skill that would open the most jobs.</p></div>'}
         </div>
         ${s.occupations.length ? `<div class="card section"><h2>Occupations you fit best</h2>
             ${bars(s.occupations.map(o => ({ name: o.title, value: o.readiness / 100, label: `${o.readiness}%`, tip: `${o.title}: ${o.readiness}% ready` })), { max: 1 })}</div>` : ''}
@@ -1017,3 +1137,135 @@ export const unlistedSchools = (rows) => rows?.length ? `
         <p class="hint">Not on SkillBridge yet. Adding them (with programs and courses) gives these students course skills and their career office insights.</p>
         ${bars(rows.map(r => ({ name: r.schoolName, value: r.students, label: plural(r.students, 'student'), tip: `${r.schoolName}: ${plural(r.students, 'student')}` })))}
     </div>` : ''
+
+// ---------------------------------------------------------------- student: mock interview
+
+const FOCUS_NOTE = {
+    STRETCH: 'You match part of this job, so the interviewer focuses on transferable skills and how you would close your gaps.',
+    CLOSE: 'You are close to this job: expect questions that dig into your skills, one "tell me about a time" question, and one about a skill you are missing.',
+    FULL: 'You match this job fully: this is a realistic final-round interview, with a high bar.'
+}
+
+export const interview = (state) => {
+    const iv = state.interview
+    if(iv.busy === 'starting') return `
+        <h1>Mock interview</h1>
+        <div class="card interview-wait"><div class="dots"><span></span><span></span><span></span></div>
+            <p>Your interviewer is reading the job description and preparing questions…</p></div>`
+    if(iv.current) return iv.current.status === 'FINISHED' && iv.current.report ? interviewReport(iv.current) : interviewRoom(state, iv.current)
+    if(!iv.list) return loading('Mock interview')
+
+    return `
+    <h1>Mock interview</h1>
+    <p class="sub">Practice with an AI interviewer who acts like an experienced HR recruiter. Questions come from the job's own
+        description, and you get honest feedback at the end. Available for jobs you match at least ${INTERVIEW_MIN_SCORE}%.</p>
+    <div class="grid tiles">
+        ${tile('30–49% match', 'Stretch', 'Transferable skills, closing gaps')}
+        ${tile('50–99% match', 'Close', 'Your skills in depth + one gap')}
+        ${tile('100% match', 'Full', 'Realistic final round')}
+    </div>
+    <div class="card section">
+        <h2>Start one</h2>
+        <p class="hint">Press <strong>Practice interview</strong> on a job in <a href="#/matches">Job matches</a>,
+            <a href="#/alerts">Job alerts</a>, or after <a href="#/jobcheck">checking a job link</a>.</p>
+    </div>
+    <h2 class="section">Your interviews</h2>
+    ${iv.list.length ? `<div class="grid" style="margin-top:12px">${iv.list.map(s => `
+        <div class="card job">
+            <div class="card-head">
+                <div>
+                    <div class="title">${esc(s.job.title)}</div>
+                    <div class="meta">${esc(s.job.company ?? '')} · ${s.score}% match · ${esc(fmtTime(s.createdAt))}</div>
+                </div>
+                <div class="score">${s.status === 'FINISHED'
+                    ? `<div class="pct">${s.overall}/5</div><div class="hint">${esc(s.verdict ?? '')}</div>`
+                    : '<span class="badge-soft">In progress</span>'}</div>
+            </div>
+            <div class="job-actions">
+                <button type="button" class="small primary" data-action="open-interview" data-id="${esc(s.id)}">${s.status === 'FINISHED' ? 'See feedback' : 'Continue'}</button>
+                <button type="button" class="link small" data-action="delete-interview" data-id="${esc(s.id)}">Delete</button>
+            </div>
+        </div>`).join('')}</div>`
+    : '<div class="empty">No interviews yet.</div>'}`
+}
+
+const interviewRoom = (state, s) => {
+    const busy = state.interview.busy
+    const answered = new Set(s.messages.filter(m => m.role === 'candidate').map(m => m.q)).size
+    const step = Math.min(s.currentIndex + 1, s.totalQuestions)
+    return `
+    <div class="interview-head">
+        <button type="button" class="link small" data-action="interview-back">← All interviews</button>
+        <h1>${esc(s.job.title)}</h1>
+        <p class="sub">${s.job.company ? `${esc(s.job.company)} · ` : ''}${esc(s.focusLabel)}. ${esc(FOCUS_NOTE[s.focus])}</p>
+        <div class="progress-row">
+            <span>Question ${step} of ${s.totalQuestions}</span>
+            ${meter(100 * answered / s.totalQuestions, { small: true, tip: `${answered} of ${s.totalQuestions} answered` })}
+        </div>
+    </div>
+    <div class="card chat interview-chat">
+        <div class="chat-log" id="chat-log" aria-live="polite">
+            ${s.messages.map(m => `
+                <div class="msg ${m.role === 'candidate' ? 'me' : 'bot'}">
+                    ${m.role === 'interviewer' ? '<div class="who-label">Interviewer</div>' : ''}${esc(m.text)}
+                </div>`).join('')}
+            ${busy === 'answering' ? '<div class="msg bot thinking">The interviewer is listening…</div>' : ''}
+            ${busy === 'finishing' ? '<div class="msg bot thinking">Preparing your feedback…</div>' : ''}
+        </div>
+        <form class="chat-form" data-form="interview-answer">
+            <textarea name="answer" rows="4" maxlength="2000" required placeholder="Answer like you would in a real interview. Use a real example when you can (situation, what you did, the result)."
+                data-ctrl-enter="interview-answer" ${busy ? 'disabled' : ''}></textarea>
+            <div class="inline">
+                <button type="submit" class="primary" ${busy ? 'disabled' : ''}>Send answer</button>
+                <button type="button" data-action="interview-finish" ${busy || !answered ? 'disabled' : ''}>End and get feedback</button>
+                <span class="hint">Ctrl+Enter sends</span>
+            </div>
+        </form>
+    </div>`
+}
+
+const scoreDots = (n) => n == null
+    ? '<span class="badge-soft">Not reached</span>'
+    : `<span class="score-dots" aria-label="${n} out of 5">${[1, 2, 3, 4, 5].map(i => `<span class="${i <= n ? 'on' : ''}"></span>`).join('')}</span>`
+
+const interviewReport = (s) => {
+    const r = s.report
+    return `
+    <div class="interview-head">
+        <button type="button" class="link small" data-action="interview-back">← All interviews</button>
+        <h1>Interview feedback</h1>
+        <p class="sub">${esc(s.job.title)}${s.job.company ? ` at ${esc(s.job.company)}` : ''} · ${esc(s.focusLabel)}</p>
+    </div>
+    <div class="card hero">
+        <div class="figure"><span data-count="${r.overall}">${r.overall}</span><small>/5</small></div>
+        <div class="about">
+            <h2>${esc(r.verdict)}</h2>
+            ${meter(r.overall * 20, { tip: `${r.overall} out of 5` })}
+            ${r.summary ? `<p style="margin:10px 0 0">${esc(r.summary)}</p>` : ''}
+        </div>
+    </div>
+    <div class="grid two section">
+        <div class="card"><h2>What went well</h2>
+            ${r.strengths.length ? `<ul class="evidence">${r.strengths.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="hint">—</p>'}</div>
+        <div class="card"><h2>What to improve</h2>
+            ${r.improvements.length ? `<ul class="evidence">${r.improvements.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="hint">—</p>'}</div>
+    </div>
+    <h2 class="section">Question by question</h2>
+    <div class="grid" style="margin-top:12px">${r.questions.map((q, i) => `
+        <div class="card">
+            <div class="card-head"><strong>${i + 1}. ${esc(q.question)}</strong>${scoreDots(q.score)}</div>
+            ${q.score == null ? '<p class="hint">The interview ended before this question.</p>' : q.feedback ? `<p>${esc(q.feedback)}</p>` : ''}
+            ${q.tip ? `<div class="notice tip"><strong>A stronger answer:</strong> ${esc(q.tip)}</div>` : ''}
+        </div>`).join('')}
+    </div>
+    ${r.nextSteps.length ? `<div class="card section"><h2>Next steps</h2>
+        <ul class="evidence">${r.nextSteps.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+        <p class="hint">See the <a href="#/gap">Gap report</a> for free courses on missing skills.</p></div>` : ''}
+    <div class="inline section">
+        ${s.jobId ? `<button type="button" class="primary" data-action="start-interview" data-job-id="${esc(s.jobId)}">Practice again</button>` : ''}
+        <button type="button" data-action="interview-back">All interviews</button>
+    </div>
+    <details class="card section transcript"><summary>Transcript</summary>
+        ${s.messages.map(m => `<p><strong>${m.role === 'interviewer' ? 'Interviewer' : 'You'}:</strong> ${esc(m.text)}</p>`).join('')}
+    </details>`
+}

@@ -108,6 +108,8 @@ const analyzeJob = async (user, input) => {
         posting: {
             title: posting.title, company: posting.company, location: posting.location, url: posting.url,
             readFrom: posting.readFrom, excerpt: posting.description.slice(0, 1500),
+            // Full text (capped) so a mock interview can be written from it
+            description: posting.description.slice(0, 5000),
             occupation: occupation?.title ?? null, skillsFound: jobSkills.length
         },
         match: null,

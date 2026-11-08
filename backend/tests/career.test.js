@@ -22,7 +22,7 @@ delete process.env.AI_API_KEY // these tests cover the non-AI paths
 const { default: request } = await import('supertest')
 const { default: app } = await import('../src/app.js')
 const { readJobPage } = await import('../src/services/jobPageReader.js')
-const { sentences, keepGrounded, templateContent, cleanInput } = await import('../src/services/resumeService.js')
+const { sentences, keepGrounded, templateContent, cleanInput, resolveSkills, buildSkillIndex } = await import('../src/services/resumeService.js')
 const { invalidateTaxonomy } = await import('../src/services/taxonomyCache.js')
 
 const student = jwt.sign({ id: 'u1', role: 'STUDENT' }, process.env.JWT_PASS)
@@ -98,18 +98,84 @@ describe('resume helpers', () => {
         expect(keepGrounded(['Led a team of 50 engineers at Google'], source, ['Fixed computers'])).toEqual(['Fixed computers'])
     })
 
-    it('builds a template resume from profile facts', () => {
-        const input = cleanInput({ contact: { fullName: 'Franco Lim' }, targetRole: 'Junior Web Developer', experience: [{ role: 'Intern', description: 'Built pages. Fixed bugs' }] })
-        const r = templateContent(input, {
-            program: 'BS Information Technology', school: 'PSI',
-            skills: [{ id: 'js', name: 'JavaScript', category: 'Programming' }, { id: 'sql', name: 'SQL', category: 'Data' }],
-            certificates: ['CSS NC II'], projects: [{ title: 'Clinic app', description: 'Booking app with React', skills: ['React'] }]
+    const skillIndex = buildSkillIndex([
+        { id: 'js', name: 'JavaScript', category: 'Programming', aliases: ['js'] },
+        { id: 'sql', name: 'SQL', category: 'Data', aliases: [] },
+        { id: 'excel', name: 'Microsoft Excel', category: 'Office', aliases: ['ms excel', 'excel'] }
+    ])
+    const profile = {
+        program: 'BS Information Technology', school: 'PSI', skillIndex,
+        skills: [{ id: 'js', name: 'JavaScript', category: 'Programming' }, { id: 'sql', name: 'SQL', category: 'Data' }],
+        certificates: ['CSS NC II'], projects: [{ title: 'Clinic app', description: 'Booking app with React', skills: ['React'] }]
+    }
+
+    it('builds a template resume with only the skills the student chose', () => {
+        const input = cleanInput({
+            contact: { fullName: 'Franco Lim' }, targetRole: 'Junior Web Developer',
+            skills: ['javascript', 'MS Excel'],
+            experience: [{ role: 'Intern', description: 'Built pages. Fixed bugs' }]
         })
+        const r = templateContent(input, profile)
         expect(r.headline).toBe('Junior Web Developer')
-        expect(r.summary).toBe('BS Information Technology student at PSI with skills in JavaScript and SQL, seeking a Junior Web Developer role.')
+        // SQL is on the profile but was not chosen, so it is not on the resume
+        expect(r.skillGroups).toEqual([
+            { category: 'Programming', skills: ['JavaScript'] },
+            { category: 'Office', skills: ['Microsoft Excel'] }
+        ])
+        expect(r.summary).toBe('BS Information Technology student at PSI with skills in JavaScript and Microsoft Excel, seeking a Junior Web Developer role.')
         expect(r.experience[0].bullets).toEqual(['Built pages', 'Fixed bugs'])
         expect(r.projects[0]).toMatchObject({ title: 'Clinic app', skills: ['React'] })
         expect(r.certifications).toEqual(['CSS NC II'])
+    })
+
+    it('puts no skills on the resume unless the student adds them', () => {
+        const r = templateContent(cleanInput({ contact: { fullName: 'Franco Lim' } }), profile)
+        expect(r.skillGroups).toEqual([])
+        expect(r.summary).toBe('BS Information Technology student at PSI.')
+    })
+
+    it('keeps skills it does not know, under "Other", and drops repeats', () => {
+        expect(cleanInput({ contact: { fullName: 'A' }, skills: [' Canva ', 'canva', 'JS', ''] }).skills).toEqual(['Canva', 'JS'])
+        expect(resolveSkills(['Canva', 'JS', 'JavaScript'], skillIndex)).toEqual([
+            { id: null, name: 'Canva', category: 'Other' },
+            { id: 'js', name: 'JavaScript', category: 'Programming' }
+        ])
+        expect(() => cleanInput({ contact: { fullName: 'A' }, skills: Array.from({ length: 41 }, (_, i) => `s${i}`) })).toThrow('At most 40')
+    })
+
+    it('adds typed projects after the profile ones, without repeats', () => {
+        const input = cleanInput({
+            contact: { fullName: 'A' },
+            projects: [
+                { title: 'Inventory app', tools: 'Laravel, MySQL , ', description: 'Built stock pages. Added reports' },
+                { title: 'clinic app', description: 'Same as the profile one' },
+                { title: '', tools: '', description: '' }
+            ]
+        })
+        expect(input.projects).toHaveLength(2)
+        expect(templateContent(input, profile).projects).toEqual([
+            { title: 'Clinic app', skills: ['React'], bullets: ['Booking app with React'] },
+            { title: 'Inventory app', skills: ['Laravel', 'MySQL'], bullets: ['Built stock pages', 'Added reports'] }
+        ])
+        // Profile projects left out: the typed ones still print
+        expect(templateContent({ ...input, includeProjects: false }, profile).projects.map(p => p.title)).toEqual(['Inventory app', 'clinic app'])
+        expect(() => cleanInput({ contact: { fullName: 'A' }, projects: [{ description: 'x' }] })).toThrow('needs a title')
+    })
+
+    it('adds typed certificates after the profile ones, without repeats', () => {
+        const input = cleanInput({
+            contact: { fullName: 'A' },
+            certifications: [
+                { name: 'Google Data Analytics', issuer: 'Coursera', date: '2025' },
+                { name: 'css nc ii', issuer: 'TESDA' },
+                { name: 'First Aid' },
+                { name: '', issuer: '', date: '' }
+            ]
+        })
+        expect(input.certifications).toHaveLength(3)
+        expect(templateContent(input, profile).certifications).toEqual(['CSS NC II', 'Google Data Analytics, Coursera (2025)', 'First Aid'])
+        expect(() => cleanInput({ contact: { fullName: 'A' }, certifications: [{ issuer: 'TESDA' }] })).toThrow('needs a name')
+        expect(() => cleanInput({ contact: { fullName: 'A' }, certifications: Array(11).fill({ name: 'x' }) })).toThrow('at most 10')
     })
 
     it('validates input', () => {

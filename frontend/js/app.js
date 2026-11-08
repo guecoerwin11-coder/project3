@@ -34,6 +34,7 @@ const state = {
     coverLetterBusy: false,
     resumeDraft: null,
     resumeBusy: false,
+    interview: { list: null, current: null, busy: null }, // busy: starting | answering | finishing
     ai: { status: null, messages: [], pending: false },
     live: { connected: false, unread: 0, activity: [] }
 }
@@ -42,7 +43,7 @@ let stopLive = null
 
 const root = document.getElementById('app')
 const PAGES = {
-    profile: V.profile, matches: V.matches, alerts: V.alerts, jobcheck: V.jobcheck, resume: V.resume,
+    profile: V.profile, matches: V.matches, alerts: V.alerts, jobcheck: V.jobcheck, resume: V.resume, interview: V.interview,
     gap: V.gap, assistant: V.assistant, market: V.market,
     programs: V.programs, ingest: V.ingest, jobs: V.jobs, taxonomy: V.taxonomy
 }
@@ -154,6 +155,11 @@ const loaders = {
         }
     },
     async jobcheck(){ /* nothing to load: the page starts with the form */ },
+    async interview(){
+        if(state.interview.busy === 'starting') return
+        state.interview.list = (await api('/me/interviews')).data
+        if(state.interview.current) state.interview.current = await api(`/me/interviews/${encodeURIComponent(state.interview.current.id)}`)
+    },
     async resume(){
         state.data.resume = await api('/me/resume')
     },
@@ -195,7 +201,9 @@ const loaders = {
         state.data.jobs = (await api(`/jobs?limit=60${q}`)).data
     },
     async taxonomy(){
-        state.data.taxonomy = (await api('/skills')).data
+        const [skills, requested] = await Promise.all([api('/skills'), api('/skills/requested')])
+        state.data.taxonomy = skills.data
+        state.data.requestedSkills = requested.data
     }
 }
 
@@ -233,6 +241,7 @@ const logout = (message) => {
         aiIntakeDraft: null, lastAiIntake: null, aiIntakeBusy: false,
         // Shared lab computers: the next student must not see this one's job check or resume
         jobCheck: null, jobCheckDraft: null, coverLetter: null, resumeDraft: null, regManual: false,
+        interview: { list: null, current: null, busy: null },
         ai: { status: null, messages: [], pending: false }
     })
     location.hash = ''
@@ -284,10 +293,30 @@ const readResumeForm = (form) => {
         contact: { fullName: f.fullName, email: f.email, phone: f.phone, location: f.location, link: f.link },
         targetRole: f.targetRole,
         about: f.about,
-        education: rows('edu', ['school', 'degree', 'years', 'details']),
-        experience: rows('exp', ['role', 'organization', 'dates', 'description']),
+        experience: rows('exp', ['role', 'organization', 'dates', 'location', 'description']),
+        education: rows('edu', ['school', 'degree', 'years', 'location']),
+        projects: rows('proj', ['title', 'tools', 'description']),
+        certifications: rows('cert', ['name', 'issuer', 'date']),
+        // Each chosen skill is a hidden input (FormData into an object would keep only one)
+        skills: [...form.querySelectorAll('input[name=skill]')].map(i => i.value),
         includeProjects: Boolean(form.querySelector('input[name=includeProjects]')?.checked)
     }
+}
+
+// Updates the resume's skill list, keeping everything else typed in the form
+const MAX_RESUME_SKILLS = 40
+const changeResumeSkills = (update) => {
+    const form = root.querySelector('form[data-form=resume]')
+    if(!form) return
+    const input = readResumeForm(form)
+    const seen = new Set()
+    const next = update(input.skills).filter(s => {
+        const k = s.toLowerCase()
+        return !seen.has(k) && seen.add(k)
+    })
+    if(next.length > MAX_RESUME_SKILLS) return toast(`At most ${MAX_RESUME_SKILLS} skills`, 'error')
+    state.resumeDraft = { ...input, skills: next }
+    renderPage()
 }
 
 const forms = {
@@ -407,6 +436,31 @@ const forms = {
         await load('ingest')
     },
 
+    async 'interview-answer'(form){
+        const s = state.interview.current
+        const answer = values(form).answer.trim()
+        if(!s || !answer || state.interview.busy) return
+        // Show the answer right away while the interviewer "listens"
+        s.messages = [...s.messages, { role: 'candidate', text: answer, q: s.currentIndex }]
+        state.interview.busy = 'answering'
+        renderPage()
+        scrollChat()
+        try{
+            state.interview.current = await api(`/me/interviews/${encodeURIComponent(s.id)}/answer`, { method: 'POST', body: { answer } })
+        }catch(err){
+            s.messages = s.messages.slice(0, -1) // not saved: let them send it again
+            state.interview.busy = null
+            renderPage()
+            const box = root.querySelector('form[data-form=interview-answer] textarea')
+            if(box) box.value = answer
+            throw err
+        }
+        state.interview.busy = null
+        renderPage()
+        if(state.interview.current.status === 'FINISHED') window.scrollTo({ top: 0, behavior: 'smooth' })
+        else focusAnswer()
+    },
+
     async jobcheck(form){
         const f = values(form)
         state.jobCheckDraft = { ...state.jobCheckDraft, ...f }
@@ -431,8 +485,11 @@ const forms = {
         try{
             state.data.resume = await api('/me/resume', { method: 'POST', body: { input } })
             state.resumeDraft = null
-            const n = state.data.resume.suggestions?.jobs.length ?? 0
-            toast(`Resume ready${state.data.resume.generatedBy === 'AI' ? ' (polished by AI)' : ''}. ${n ? `${n} jobs to apply to below.` : ''}`)
+            const d = state.data.resume
+            const n = d.suggestions?.jobs.length ?? 0
+            const how = d.generatedBy === 'AI' ? ' (polished by AI)'
+                : d.aiAvailable ? ' from your own words (the AI was not available)' : ''
+            toast(`Resume ready${how}. ${n ? `${n} jobs to apply to below.` : ''}`)
         }finally{
             state.resumeBusy = false
             renderPage()
@@ -446,11 +503,12 @@ const forms = {
 
     async 'new-skill'(form){
         const { name, category, aliases, parentId } = values(form)
-        await api('/skills', {
+        const res = await api('/skills', {
             method: 'POST',
             body: { name, category, aliases: aliases.split(',').map(a => a.trim()).filter(Boolean), parentId: parentId || null }
         })
-        toast(`Added ${name}. Re-extract postings on the Ingestion page to apply it.`)
+        const n = res.convertedStudents ?? 0
+        toast(`Added ${name}${n ? `; ${n} student${n === 1 ? '' : 's'} now have it as a real skill` : ''}. Re-extract postings on the Ingestion page to apply it.`)
         await load('taxonomy')
     }
 }
@@ -460,6 +518,76 @@ const forms = {
 const actions = {
     logout: () => logout(),
     'toggle-theme': () => toggleTheme(),
+
+    // ---------- mock interview ----------
+    async 'start-interview'(el){
+        const body = el.dataset.from === 'jobcheck'
+            ? { posting: { ...state.jobCheck.posting, description: state.jobCheck.posting.description ?? state.jobCheck.posting.excerpt } }
+            : { jobId: el.dataset.jobId }
+        state.interview.busy = 'starting'
+        state.interview.current = null
+        if(route() === 'interview') renderPage()
+        else location.hash = '#/interview' // the page shows "preparing questions" while busy
+        try{
+            state.interview.current = await api('/me/interviews', { method: 'POST', body })
+        }catch(err){
+            state.interview.busy = null
+            await load('interview')
+            throw err
+        }
+        state.interview.busy = null
+        renderPage()
+        focusAnswer()
+    },
+    async 'open-interview'(el){
+        state.interview.current = await api(`/me/interviews/${encodeURIComponent(el.dataset.id)}`)
+        renderPage()
+        focusAnswer()
+    },
+    async 'delete-interview'(el){
+        if(!confirm('Delete this interview and its feedback?')) return
+        await api(`/me/interviews/${encodeURIComponent(el.dataset.id)}`, { method: 'DELETE' })
+        await load('interview')
+    },
+    async 'interview-back'(){
+        state.interview.current = null
+        await load('interview')
+    },
+    async 'interview-finish'(){
+        const s = state.interview.current
+        if(!s || !confirm('End the interview now? Questions you have not answered will not be scored.')) return
+        state.interview.busy = 'finishing'
+        renderPage()
+        scrollChat()
+        try{
+            state.interview.current = await api(`/me/interviews/${encodeURIComponent(s.id)}/finish`, { method: 'POST' })
+        }finally{
+            state.interview.busy = null
+            renderPage()
+        }
+    },
+    async 'add-custom-skill'(){
+        const name = state.skillQuery
+        if(!name) return
+        const res = await api('/me/custom-skills', { method: 'POST', body: { name } })
+        toast(res.added === 'known'
+            ? `Added ${res.skill.name} (SkillBridge knows it by that name)`
+            : `Added "${res.skill.name}" as your own skill`)
+        state.skillResults = null
+        state.skillQuery = ''
+        await load('profile')
+    },
+    'prefill-skill'(el){
+        const input = root.querySelector('form[data-form=new-skill] input[name=name]')
+        if(!input) return
+        input.value = el.dataset.name
+        root.querySelector('form[data-form=new-skill] input[name=category]')?.focus()
+        input.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    },
+    async 'remove-custom-skill'(el){
+        await api(`/me/custom-skills/${encodeURIComponent(el.dataset.id)}`, { method: 'DELETE' })
+        await load('profile')
+    },
     'jobcheck-mode'(el){
         const form = root.querySelector('form[data-form=jobcheck]')
         if(form) state.jobCheckDraft = { ...state.jobCheckDraft, ...values(form) }
@@ -477,6 +605,13 @@ const actions = {
                 body: { posting: { title: p.title, company: p.company, description: p.excerpt } }
             })
             state.coverLetter = res.letter
+        }catch(err){
+            // Provider details ("HTTP 400") mean nothing to a student; the server log has them
+            if(err instanceof ApiError && (err.status === 503 || err.status === 500)){
+                toast('The AI writer is not available right now. Please try again later.', 'error')
+                return
+            }
+            throw err
         }finally{
             state.coverLetterBusy = false
             renderPage()
@@ -495,12 +630,17 @@ const actions = {
     'resume-add'(el){
         const form = root.querySelector('form[data-form=resume]')
         const input = form ? readResumeForm(form) : structuredClone(state.data.resume.input)
-        const blank = el.dataset.list === 'education'
-            ? { school: '', degree: '', years: '', details: '' }
-            : { role: '', organization: '', dates: '', description: '' }
-        const max = el.dataset.list === 'education' ? 4 : 6
-        if(input[el.dataset.list].length >= max) return toast(`At most ${max} entries`)
-        input[el.dataset.list].push(blank)
+        const blank = {
+            experience: { max: 6, row: { role: '', organization: '', dates: '', location: '', description: '' } },
+            education: { max: 4, row: { school: '', degree: '', years: '', location: '' } },
+            projects: { max: 6, row: { title: '', tools: '', description: '' } },
+            certifications: { max: 10, row: { name: '', issuer: '', date: '' } }
+        }
+        const list = blank[el.dataset.list] ? el.dataset.list : 'experience'
+        const { max, row } = blank[list]
+        input[list] ??= []
+        if(input[list].length >= max) return toast(`At most ${max} entries`)
+        input[list].push(row)
         state.resumeDraft = input
         renderPage()
     },
@@ -512,6 +652,23 @@ const actions = {
         renderPage()
     },
     'print-resume': () => window.print(),
+    'resume-skill-add'(){
+        const box = document.getElementById('resume-skill-input')
+        const name = box?.value.trim().replace(/\s+/g, ' ')
+        if(!name) return box?.focus()
+        changeResumeSkills(skills => [...skills, name])
+        document.getElementById('resume-skill-input')?.focus() // keep typing the next one
+    },
+    'resume-skill-suggest'(el){
+        changeResumeSkills(skills => [...skills, el.dataset.name])
+    },
+    'resume-skill-all'(){
+        const offered = [...root.querySelectorAll('[data-action=resume-skill-suggest]')].map(b => b.dataset.name)
+        changeResumeSkills(skills => [...skills, ...offered])
+    },
+    'resume-skill-remove'(el){
+        changeResumeSkills(skills => skills.filter((_, i) => i !== Number(el.dataset.index)))
+    },
     async 'resume-add-skill'(el){
         await api('/me/skills', { method: 'POST', body: { skillId: el.dataset.id } })
         toast(`Added ${el.textContent.replace('+', '').trim()} to your profile`)
@@ -666,6 +823,37 @@ root.addEventListener('click', async (e) => {
     }catch(err){
         fail(err)
     }
+})
+
+// While printing a resume (button or Ctrl+P), the page title becomes "Name - Resume":
+// "Save as PDF" uses it as the file name, and if someone turns the browser's
+// headers back on, that is what shows instead of "SkillBridge".
+const APP_TITLE = document.title
+window.addEventListener('beforeprint', () => {
+    const name = state.user && route() === 'resume' ? state.data.resume?.content?.name : null
+    if(name) document.title = `${name} - Resume`
+})
+window.addEventListener('afterprint', () => { document.title = APP_TITLE })
+
+const focusAnswer = () => {
+    scrollChat()
+    root.querySelector('form[data-form=interview-answer] textarea')?.focus()
+}
+
+// Ctrl+Enter (Cmd+Enter on Mac) sends an interview answer; plain Enter makes a new line
+root.addEventListener('keydown', (e) => {
+    const el = e.target.closest?.('[data-ctrl-enter]')
+    if(!el || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return
+    e.preventDefault()
+    el.closest('form')?.requestSubmit()
+})
+
+// Enter in the "add a skill" box adds the skill instead of submitting (building) the resume
+root.addEventListener('keydown', (e) => {
+    const el = e.target.closest?.('[data-enter]')
+    if(!el || e.key !== 'Enter' || e.isComposing) return
+    e.preventDefault()
+    actions[el.dataset.enter]?.(el)
 })
 
 root.addEventListener('change', (e) => {

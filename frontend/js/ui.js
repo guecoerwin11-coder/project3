@@ -106,5 +106,5 @@ export const installTooltips = () => {
     document.addEventListener('focusout', () => { tip.hidden = true })
 }
 
-// The SkillBridge bullfinch (palette: red #f13424, charcoal #333, black #1a1a1a, grey #999, peach #ffdac5)
-export const LOGO = `<svg class="logo" width="34" height="34" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#ffdac5"/><g class="bird" transform="translate(1 -3)"><path d="M8 43 C16 41 22 44 27 48 C31 51 35 53 40 52 C33 56 25 54 19 49 C15 46 12 44 8 43Z" fill="#fff"/><path d="M8 43 C20 35 30 27 36 20 L40 24 C35 31 27 38 20 41 Z" fill="#999"/><path d="M37 19 C46 19 53 27 53 37 C53 47 46 54 37 54 C31 54 27 51 24 48 C30 50 36 50 40 45 C44 40 44 32 39 27 C36 24 35 21 37 19Z" fill="#f13424"/><path d="M8 43 C18 37 26 31 31 28 C38 25 44 30 43 37 C42 44 36 48 30 47 C24 47 18 43 8 43Z" fill="#333"/><path d="M8 43 L13 40 C15 42 18 43 21 44 C16 43 12 43 8 43Z" fill="#1a1a1a"/><path d="M35 21 C38 15 47 14 54 19 C50 20 48 23 47 27 C45 22 41 20 35 21Z" fill="#1a1a1a"/></g></svg>`
+// The SkillBridge bridge (the original mark), in the app's red
+export const LOGO = `<svg class="logo" width="34" height="34" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#e73125"/><g class="mark"><path d="M5 21c5-8 17-8 22 0" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M9 21v4M23 21v4M16 15v10" stroke="#fff" stroke-width="3" stroke-linecap="round"/></g></svg>`

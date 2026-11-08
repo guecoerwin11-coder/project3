@@ -89,7 +89,42 @@ const createSkill = async (req, res, next) => {
             data: { name: name.trim(), category: category.trim(), aliases: cleanAliases(aliases) ?? [], parentId: await checkParent(parentId) }
         })
         invalidateTaxonomy()
-        res.status(201).json({ data: skill })
+        const converted = await convertCustomSkills(skill)
+        res.status(201).json({ data: skill, convertedStudents: converted })
+    }catch(err){
+        next(err)
+    }
+}
+
+const nameKeyOf = (s) => String(s).trim().replace(/\s+/g, ' ').toLowerCase()
+
+// A new taxonomy skill replaces the custom skills students typed for it (by name or
+// alias): they get the real skill, which counts in matching. Returns students converted.
+const convertCustomSkills = async (skill) => {
+    const keys = [...new Set([skill.name, ...(skill.aliases ?? [])].map(nameKeyOf))]
+    const rows = await prisma.customSkill.findMany({ where: { nameKey: { in: keys } }, select: { id: true, userId: true } })
+    if(!rows.length) return 0
+    await prisma.$transaction([
+        prisma.studentSkill.createMany({
+            data: [...new Set(rows.map(r => r.userId))].map(userId => ({ userId, skillId: skill.id, source: 'SELF', evidence: '' })),
+            skipDuplicates: true
+        }),
+        prisma.customSkill.deleteMany({ where: { id: { in: rows.map(r => r.id) } } })
+    ])
+    return new Set(rows.map(r => r.userId)).size
+}
+
+// ADMIN: skills students typed that the taxonomy lacks, most students first
+const listRequestedSkills = async (req, res, next) => {
+    try{
+        const rows = await prisma.customSkill.groupBy({
+            by: ['nameKey'],
+            _count: { _all: true },
+            _min: { name: true },
+            orderBy: { _count: { nameKey: 'desc' } },
+            take: 50
+        })
+        res.status(200).json({ data: rows.map(r => ({ name: r._min.name, students: r._count._all })) })
     }catch(err){
         next(err)
     }
@@ -110,7 +145,9 @@ const updateSkill = async (req, res, next) => {
             }
         })
         invalidateTaxonomy()
-        res.status(200).json({ data: skill })
+        // A new alias may match skills students typed ("canva" added to an existing skill)
+        const converted = await convertCustomSkills(skill)
+        res.status(200).json({ data: skill, convertedStudents: converted })
     }catch(err){
         next(err)
     }
@@ -140,5 +177,5 @@ const listCertifications = async (req, res, next) => {
 }
 
 export {
-    listSchools, listUnlistedSchools, listCourses, listSkills, createSkill, updateSkill, listOccupations, listCertifications
+    listSchools, listUnlistedSchools, listRequestedSkills, listCourses, listSkills, createSkill, updateSkill, listOccupations, listCertifications
 }

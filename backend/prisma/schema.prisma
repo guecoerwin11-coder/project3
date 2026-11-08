@@ -155,6 +155,8 @@ model User {
   school   School?        @relation(fields: [schoolId], references: [id])
   program  Program?       @relation(fields: [programId], references: [id])
   resume   Resume?
+  customSkills CustomSkill[]
+  interviews   InterviewSession[]
   skills        StudentSkill[]
   projects      Project[]
   notifications Notification[]
@@ -176,6 +178,22 @@ model StudentSkill {
   // The same skill can be backed by several sources, but each piece of evidence once
   @@unique([userId, skillId, source, evidence])
   @@index([userId])
+}
+
+// A skill a student added that is not in the taxonomy yet ("Canva", "CapCut").
+// Kept apart from Skill so typos never reach extraction and analytics; admins see
+// the most common ones and can add them to the taxonomy, which converts these rows.
+model CustomSkill {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  name      String   // as the student typed it (first time)
+  nameKey   String   @map("name_key") // lower-cased, single spaces: for matching and counting
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, nameKey])
+  @@index([nameKey])
 }
 
 model Project {
@@ -317,6 +335,30 @@ model PostingReview {
   createdAt  DateTime     @default(now()) @map("created_at")
 
   @@index([status, createdAt])
+}
+
+// AI mock interview for one job. The job is copied in (a snapshot), so the session still
+// makes sense if the posting is later removed or was only a pasted link.
+model InterviewSession {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  jobId        String?  @map("job_id") // set when it came from a stored posting
+  job          Json     // { title, company, location, url, description }
+  match        Json     // { score, status, matched: [names], missing: [names] }
+  focus        String   // STRETCH (30-49%) | CLOSE (50-99%) | FULL (100%)
+  plan         Json     // [{ type, question, lookingFor }] written by the AI from the description
+  messages     Json     // [{ role: interviewer | candidate, text, q }]
+  assessments  Json     @default("[]") // [{ q, score, note }]: hidden until the report
+  currentIndex Int      @default(0) @map("current_index")
+  followUps    Int      @default(0) @map("follow_ups") // asked for the current question
+  status       String   @default("ACTIVE") // ACTIVE | FINISHED
+  report       Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
 }
 
 // The student's latest resume: what they entered, and the written version

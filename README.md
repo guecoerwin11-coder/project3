@@ -90,6 +90,68 @@ are extracted the usual way and **student matches update automatically**.
   text, the posting is held, because invented requirements would distort matching.
 - A held posting can be corrected (e.g. a missing company) and published, or rejected.
 
+### Student career tools
+
+**School not listed.** At sign-up a student can tick "My school isn't on the list" and type their
+school and program. These are stored as plain text on the account (`User.schoolName/programName`),
+not as new School rows, so typos never reach career-office analytics. A typed name matching a
+listed school is refused with a pointer to the list. These students have no course-mapped skills;
+certificates, projects, self-declared skills and the resume still work. Admins see the typed
+schools, most students first, on Program insights (`GET /api/schools/unlisted`): who to onboard.
+
+**Check a job link** (`POST /api/me/job-check`, `src/services/jobLinkService.js`). The student
+pastes a link (or the description). The page is read once on their behalf: SSRF-guarded, with
+redirects followed by hand and every hop re-checked. schema.org `JobPosting` data is used when
+the site publishes it (most career sites do, for Google for Jobs); otherwise the page text, which
+the AI may trim to the job (copy only, checked with `groundedShare`). The result: match status,
+**"your best evidence"** (which course, certificate or project proves each matched skill), what is
+missing, free courses, and an optional AI cover letter written only from the student's real
+profile (`POST /api/me/cover-letter`). Nothing is stored. Sites behind a login (LinkedIn, Indeed,
+Facebook) usually refuse; the student is told to paste the description instead.
+
+**Resume maker** (`GET/POST /api/me/resume`, `src/services/resumeService.js`). The student chooses
+which skills appear: nothing is copied automatically. Profile skills are offered as one-click
+suggestions (or "add all"), and any skill can be typed; known names are matched to the taxonomy
+("ms excel" becomes Microsoft Excel, grouped under Office), unknown ones are kept under "Other".
+Certificates and projects (optional) come from the profile; the student adds contact, target
+role, experience and education (each with a location), plus any other projects (title, tools,
+description) and certificates (name, issuer, date) by hand, printed after the profile ones
+without repeats. The printed resume uses the classic
+one-column format recruiters and ATS read best: serif type, ruled section titles in the order
+Professional Summary, Work Experience, Projects, Education, Certifications & Skills, with the
+name and date on one bold line and the role and location in italics below. Empty sections are
+left out.
+
+**Skills SkillBridge does not know.** On My skills, a search with no exact match offers "Add
+'Canva' as my own skill". A name that matches a known skill or alias ("ms excel") adds the real
+skill instead. Unknown names are kept as `CustomSkill` rows, apart from the taxonomy so typos never
+reach extraction or analytics. They show on the profile and as resume suggestions, but job
+matching cannot use them until an admin adds them: the Skills taxonomy page lists what students
+typed, most students first (`GET /api/skills/requested`), and adding the skill, or an alias with
+that spelling, converts every student's custom copy into the real skill. The AI only improves wording: every bullet and the summary are checked against the
+facts given, and anything that adds content (a new employer, tool or number) is replaced with the
+student's own sentence. Without a working AI the template version is used. After building, it
+suggests **where to apply**: READY jobs and CLOSE jobs with at least 50% (the target role first),
+best-fit occupations, and skills the resume mentions that are not on the profile yet. Printing
+gives a clean one-page document (print CSS hides the app).
+
+**AI mock interview** (`/api/me/interviews`, `src/services/interviewService.js`). From any job a
+student matches at least 30% (Job matches, Job alerts, Check a job link), an AI interviewer acting
+as an experienced HR recruiter runs a practice interview with questions written from that job's
+own description. The match sets the interview: 30-49% *stretch practice* (5 questions:
+transferable skills, closing gaps), 50-99% *close match* (6: matched skills in depth, a STAR
+question, a missing-skill question), 100% *full interview* (7, final-round bar).
+- One question at a time, at most one follow-up per question. The **server** runs the flow (next
+  question, follow-up limit, end); the AI only writes the words, and every AI reply is validated.
+  A reaction line that contains a question is trimmed, so the student never gets two at once.
+- Scores stay hidden until the end. The report gives a verdict, a 1-5 score per answer, strengths,
+  improvements, a "stronger answer" tip per question and next steps. Questions not reached (ended
+  early) are marked, never judged. If the AI cannot write the report, one is built from the notes
+  taken after each answer, so the student always gets feedback.
+- Answers are treated as data: an answer that tries to instruct the interviewer is just a weak
+  answer. Conditional updates stop a double-submitted answer. Rate-limited (10 starts, 120 answers
+  per hour); sessions are saved per student for review and deleted with the account.
+
 ### Automatic job sources and real-time alerts
 
 Jobs from other sites arrive on their own, and students hear about good matches immediately.

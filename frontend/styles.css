@@ -155,7 +155,7 @@ a:hover { text-decoration-thickness: 2px; }
 }
 .side .brand { cursor: default; }
 .brand svg { flex: none; border-radius: 10px; }
-.brand:hover .bird { animation: hop .6s var(--ease); transform-box: fill-box; transform-origin: 50% 100%; }
+.brand:hover .mark { animation: hop .6s var(--ease); transform-box: fill-box; transform-origin: 50% 100%; }
 .side a {
     color: var(--nav-dim);
     text-decoration: none;
@@ -489,8 +489,8 @@ body:has(.auth) {
 .auth { max-width: 440px; margin: 7vh auto; padding: 0 16px; animation: rise .6s var(--ease) both; }
 .auth .brand { color: var(--text); padding: 0 0 6px; font-size: 38px; justify-content: center; border: 0; flex-direction: column; gap: 10px; }
 .auth .brand svg { width: 84px; height: 84px; border-radius: 24px; box-shadow: 0 18px 40px -18px rgba(231, 49, 37, .55); }
-.auth .brand .bird { animation: bob 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
-.auth .brand:hover .bird { animation: hop .6s var(--ease); }
+.auth .brand .mark { animation: bob 3.2s ease-in-out infinite; transform-box: fill-box; transform-origin: 50% 100%; }
+.auth .brand:hover .mark { animation: hop .6s var(--ease); }
 .auth .tagline { color: var(--text-2); margin: 0 0 24px; text-align: center; font-size: 16px; }
 .auth .tabs { justify-content: center; }
 .auth .card { padding: 28px; border-top: 4px solid var(--red); }
@@ -647,37 +647,46 @@ textarea.letter { min-height: 300px; line-height: 1.6; font-size: 14.5px; }
 .empty-resume { min-height: 320px; display: grid; place-items: center; color: var(--muted); text-align: center; }
 
 /* The document itself: paper-like in both themes, because it is what gets printed */
+/* Classic one-column format: serif, black on white, ruled section titles.
+   Plain text order and real text (no images or columns) keep it ATS-readable. */
 .resume-doc {
+    --rule: #1a1a1a;
     background: #ffffff;
-    color: #1a1a1a;
-    border-radius: 6px;
-    padding: 34px 38px;
+    color: #111111;
+    border-radius: 4px;
+    padding: 36px 42px;
     box-shadow: var(--shadow);
-    font: 13.5px/1.5 var(--sans);
-    border-top: 6px solid #e73125;
+    font: 13.5px/1.42 "EB Garamond", Garamond, "Times New Roman", Georgia, serif;
 }
-.resume-doc header { border-bottom: 2px solid #333333; padding-bottom: 10px; margin-bottom: 4px; }
-.resume-doc h2 { font-family: var(--display); font-size: 28px; margin: 0; letter-spacing: -.5px; color: #1a1a1a; }
-.resume-doc .headline { color: #c8261b; font-weight: 600; font-size: 15px; }
-.resume-doc .contact { color: #4d4d4d; font-size: 12.5px; margin-top: 4px; }
-.resume-doc section { margin-top: 14px; }
+.resume-doc header { margin-bottom: 2px; }
+.resume-doc h2 {
+    font: 700 30px/1.1 "EB Garamond", Garamond, "Times New Roman", Georgia, serif;
+    margin: 0 0 4px;
+    letter-spacing: 0;
+    color: #111111;
+}
+.resume-doc .contact { font-size: 12.5px; color: #111111; }
+.resume-doc .contact .sep { font-size: 9px; margin: 0 4px; vertical-align: 1px; }
+.resume-doc section { margin-top: 12px; }
 .resume-doc h3 {
-    font-family: var(--display);
-    font-size: 12px;
-    letter-spacing: 1.4px;
+    font: 700 13px/1.2 "EB Garamond", Garamond, "Times New Roman", Georgia, serif;
     text-transform: uppercase;
-    color: #c8261b;
+    letter-spacing: .4px;
+    color: #111111;
     margin: 0 0 6px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--rule);
 }
-.resume-doc p { margin: 0 0 4px; }
-.resume-doc ul { margin: 2px 0 0; padding-left: 18px; }
-.resume-doc li { margin: 1px 0; }
+.resume-doc p { margin: 0 0 4px; text-align: justify; }
 .resume-doc .item { margin-bottom: 8px; }
-.resume-doc .item-head { display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
-.resume-doc .item-head span { margin-left: auto; color: #6e6e6e; font-size: 12.5px; }
-.resume-doc .skills { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 0; }
-.resume-doc dt { font-weight: 600; color: #333333; }
-.resume-doc dd { margin: 0; }
+.resume-doc .line { display: flex; justify-content: space-between; gap: 12px; }
+.resume-doc .line > span:last-child:not(:first-child) { white-space: nowrap; text-align: right; }
+.resume-doc .line.head { font-weight: 700; }
+/* (not ".sub": that class is the page subtitle style, with a width limit and a margin) */
+.resume-doc .line.role { font-style: italic; }
+.resume-doc ul { margin: 3px 0 0; padding-left: 20px; }
+.resume-doc li { margin: 1px 0; padding-left: 2px; }
+.resume-doc li::marker { font-size: 11px; }
 
 /* Printing: only the resume, on plain paper */
 @media print {
@@ -687,7 +696,57 @@ textarea.letter { min-height: 300px; line-height: 1.6; font-size: 14.5px; }
     main { padding: 0 !important; max-width: none !important; }
     .shell, .resume-layout { display: block !important; }
     .resume-preview { position: static; }
-    .resume-doc { box-shadow: none; border-radius: 0; padding: 0; border-top: 0; }
+    /* The page margin is zero (below), so the white space lives inside the resume.
+       "clone" repeats it at the top and bottom of every page of a longer resume. */
+    .resume-doc {
+        box-shadow: none; border-radius: 0; border-top: 0;
+        padding: 16mm 15mm !important;
+        -webkit-box-decoration-break: clone;
+        box-decoration-break: clone;
+    }
+    /* Keep each entry and each heading with its content on one page */
+    .resume-doc .item, .resume-doc header { break-inside: avoid; }
+    .resume-doc h3 { break-after: avoid; }
     #page > * { animation: none !important; }
-    @page { margin: 16mm 14mm; }
+    /* Zero margin: browsers draw their header and footer (page title, date, URL,
+       page numbers) in the margin, so with none there is nowhere to draw them */
+    @page { size: A4; margin: 0; }
 }
+
+/* ---------- resume: the add-a-skill box stands out ---------- */
+.skill-adder {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--surface-2);
+    border: 1.5px dashed rgba(231, 49, 37, .35);
+}
+.skill-adder label { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.skill-adder-row { display: flex; gap: 8px; }
+.skill-adder-row input { flex: 1; min-width: 0; }
+.skill-adder-row button { white-space: nowrap; }
+
+/* ---------- My skills: the student's own (custom) skills ---------- */
+.chip.custom { background: transparent; border: 1.5px dashed var(--border); color: var(--text); }
+
+/* ---------- mock interview ---------- */
+.job-actions { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.job-actions:has(> :only-child) { justify-content: flex-end; }
+.interview-head h1 { margin-top: 8px; }
+.progress-row { display: grid; grid-template-columns: max-content 1fr; gap: 12px; align-items: center; font-size: 13px; color: var(--text-2); margin: -10px 0 16px; }
+.progress-row .meter { margin-top: 0; }
+.interview-chat .chat-log { max-height: 58vh; }
+.msg .who-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin-bottom: 2px; }
+.interview-wait { text-align: center; padding: 48px 24px; }
+.dots { display: inline-flex; gap: 6px; margin-bottom: 10px; }
+.dots span { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: bob .9s ease-in-out infinite; }
+.dots span:nth-child(2) { animation-delay: .15s; }
+.dots span:nth-child(3) { animation-delay: .3s; }
+.score-dots { display: inline-flex; gap: 4px; }
+.score-dots span { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-track); }
+.score-dots span.on { background: var(--accent); }
+.notice.tip { margin: 8px 0 0; }
+.badge-soft { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: var(--chip-miss); color: var(--chip-miss-ink); }
+.transcript summary { cursor: pointer; font-weight: 600; }
+.transcript p { margin: 8px 0; font-size: 14px; }
